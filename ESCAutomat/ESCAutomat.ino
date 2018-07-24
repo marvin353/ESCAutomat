@@ -3,44 +3,44 @@
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
-//#include <U8g2lib.h>
-
-/*#ifdef U8X8_HAVE_HW_SPI
-#include <SPI.h>
-#endif
-//#ifdef U8X8_HAVE_HW_I2C
-#include <Wire.h>
-#endif*/
-//U8G2_SSD1306_128X64_NONAME_1_SW_I2C u8g2(U8G2_R0, /* clock=*/ SCL, /* data=*/ SDA, /* reset=*/ U8X8_PIN_NONE);
 
 const char* ssid     = "devolo-000B3BCBD17C";
 const char* password = "TQMC-BGYL-NIMJ-UZPX";
 Servo servoblau;
 Servo servorot;
 ESP8266WebServer server ( 80 );
+bool errorModeEnabled;
+bool karteLiegtAuf;
+int ledG = 12;
+int ledR = 14
 
 void setup()
 {
   Serial.begin(9600);
   servoblau.attach(12); //D6
   servorot.attach(13); //D7
-  //u8g2.begin();
-  //u8g2.enableUTF8Print();
   connectWifi();
   beginServer();
   servoblau.write(0);
   servorot.write(165);
-  //u8g2.setFont(u8g2_font_courB18_tf);
-  //u8g2.setFontDirection(0);
-  //u8g2.firstPage();
-  //do {
-   // u8g2.drawStr(0, 20, "0 Grad");
-  //} while ( u8g2.nextPage() );
+  errorModeEnabled = false;
+  karteLiegtAuf = false;
+
+  
+  
+  
 }
 
 void loop() {
   server.handleClient();
   delay(1000);
+
+  bool buttonState = digitalRead(buttonPin);
+  if (buttonState == HIGH) // check if the button is pressed
+  {
+   getChip();
+  }
+  
 }
 
 void connectWifi()
@@ -77,47 +77,114 @@ void handleSubmit() {
 
   String SERVOValue;
   SERVOValue = server.arg("SERVO");
+
+  String KARTEValue;
+  KARTEValue = server.arg("KARTE");
+  
   Serial.println("Set GPIO ");
   Serial.print(SERVOValue);
+
+
+  if ( KARTEValue == "KarteDrauf" ) {
+    setRedLightOff();
+    setGreenLightOn()
+   /* servoblau.write(0);
+    servorot.write(165);
+    server.send ( 200, "text/html", getPage() );*/
+    
+  }
+  else if ( KARTEValue == "KarteWeg" ) {
+    setGreenLightOff();
+    setRedLightOn();
+  } else {
+    Serial.println("Error KARTE Value");
+  }
+  
 
   if ( SERVOValue == "0" ) {
     servoblau.write(0);
     servorot.write(165);
     server.send ( 200, "text/html", getPage() );
-    //u8g2.setFont(u8g2_font_courB18_tf);
-    //u8g2.setFontDirection(0);
-    //u8g2.firstPage();
-    //do {
-    //  u8g2.drawStr(0, 20, "0 Grad");
-    //} while ( u8g2.nextPage() );
   }
   else if ( SERVOValue == "90" )
   {
     servoblau.write(90);
     servorot.write(90);
     server.send ( 200, "text/html", getPage() );
-    /*u8g2.setFont(u8g2_font_courB18_tf);
-    u8g2.setFontDirection(0);
-    u8g2.firstPage();
-    do {
-      u8g2.drawStr(0, 20, "90 Grad");
-    } while ( u8g2.nextPage() );*/
   }
   else if ( SERVOValue == "180" )
   {
     servoblau.write(165);
     servorot.write(0);
     server.send ( 200, "text/html", getPage() );
-    /*u8g2.setFont(u8g2_font_courB18_tf);
-    u8g2.setFontDirection(0);
-    u8g2.firstPage();
-    do {
-      u8g2.drawStr(0, 20, "180 Grad");
-    } while ( u8g2.nextPage() );*/
   } else
   {
     Serial.println("Error Servo Value");
   }
+}
+
+void buttonPressed() {
+   if (checkKarte() == true) {
+     getChip();
+   } else {
+     Serial.println("Es wurde keine Karte aufgelegt oder anderer Fehler");
+     setGreenLightOff();
+     setRedLightOn();
+   }
+}
+
+void getChip() {
+    servoblau.write(0);
+    servorot.write(165);
+    //server.send ( 200, "text/html", getPage() );
+    delay(2000);
+    servoblau.write(165);
+    servorot.write(0);
+    server.send ( 200, "text/html", getPage() );
+    sendAck();
+}
+
+bool checkKarte() {
+  // Raspbery Pi fragen ob Karte drauf liegt
+  return true;
+} 
+
+void setGreenLightOn() {
+   digitalWrite(ledG, HIGH);
+}
+
+void setGreenLightOff() {
+   digitalWrite(led, LOW);
+}
+
+void setRedLightOn() {
+  digitalWrite(ledR, HIGH);
+}
+
+void setRedLightOff() {
+  digitalWrite(ledR, LOW);
+}
+
+void errorBlink() {
+  while (errorModeEnabled == true)
+  {
+   digitalWrite(ledG, HIGH);
+   digitalWrite(ledR, LOW);
+   delay(800);
+   digitalWrite(ledG, LOW);
+   digitalWrite(ledR, HIGH);
+   delay(800);
+  }
+}
+
+void sendAck() {
+  for(int i = 0; i<3; i++){
+     setGreenLightOn();
+     delay(800);
+     setGreenLightOff();
+     delay(800);
+  }
+  //send Timestamp as acknoledgement or only send acknoledgement
 }
 
 String getPage() {
@@ -134,12 +201,14 @@ String getPage() {
            </style>\
       </head>\
    <body>\
-      <h1>ESP8266 WebServer</h1>\
+      <h1>ChipAutomat Web Interface</h1>\
       <h3>Servo Test</h3>\
       <form action='/' method='POST'>\
       <INPUT class='button' type='submit' name='SERVO' value='0'>\    
       <INPUT class='button' type='submit' name='SERVO' value='90'>\    
       <INPUT class='button' type='submit' name='SERVO' value='180'>\
+      <INPUT class='button' type='submit' name='KARTE' value='KarteDrauf'>\
+      <INPUT class='button' type='submit' name='KARTE' value='KarteWeg'>\
   </body>\
   </html>";
 
