@@ -3,26 +3,40 @@
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
+#include <ESP8266HTTPClient.h>
 
-const char* ssid     = "devolo-000B3BCBD17C";
-const char* password = "TQMC-BGYL-NIMJ-UZPX";
+//Hier ESC-WLAN-Zugangsdaten eingeben
+const char* ssid     = "hamaadapter";
+const char* password = "12345678";
+
 Servo servoblau;
 Servo servorot;
 ESP8266WebServer server ( 80 );
 bool errorModeEnabled;
 bool karteLiegtAuf;
-int ledG = 12;
-int ledR = 14
+int ledG = 4; //war vorher 12
+int ledR = 5; //war vorher 14
+
+int buttonPin = 0;
 
 void setup()
 {
   Serial.begin(9600);
+
+  pinMode(ledR, OUTPUT);
+  pinMode(ledG, OUTPUT);
+  pinMode(buttonPin, INPUT);
+
+
   servoblau.attach(12); //D6
   servorot.attach(13); //D7
+
+  setRedLightOff();
+  setGreenLightOff();
+  
   connectWifi();
   beginServer();
-  servoblau.write(0);
-  servorot.write(165);
+  servorot.write(0);
   errorModeEnabled = false;
   karteLiegtAuf = false;
 
@@ -36,11 +50,12 @@ void loop() {
   delay(1000);
 
   bool buttonState = digitalRead(buttonPin);
-  if (buttonState == HIGH) // check if the button is pressed
+  if (buttonState == LOW) // check if the button is pressed
   {
-   getChip();
+     buttonPressed();
+     setGreenLightOn();
   }
-  
+  setGreenLightOff();
 }
 
 void connectWifi()
@@ -49,8 +64,9 @@ void connectWifi()
   delay(2000);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    delay(500); 
     Serial.print(".");
+    redGreenBlink();
   }
   Serial.println("");
   Serial.println("WiFi connected");
@@ -60,22 +76,60 @@ void connectWifi()
 
 void beginServer()
 {
-  server.on ( "/", handleRoot );
+  //server.on ( "/", handleRoot );
+  server.on("/chipArgs", handleChipArg); 
+  server.onNotFound(handleNotFound);
   server.begin();
   Serial.println ( "HTTP server started" );
+  getChip();
 }
 
-void handleRoot() {
+/*void handleRoot() {
   if ( server.hasArg("SERVO") ) {
     handleSubmit();
   } else {
     server.send ( 200, "text/html", getPage() );
   }
+  if ( server.hasArg("KARTE") ) {
+    handleSubmit();
+  } else {
+    server.send ( 200, "text/html", getPage() );
+  }
+  if ( server.hasArg("CHIP") ) {
+    handleSubmit();
+  } else {
+    server.send ( 200, "text/html", getPage() );
+  }
+}*/
+
+void handleChipArg() { 
+
+  String message = "";
+
+    if (server.arg("IchWillChip") == "getChip"){     //Parameter not found
+
+      message = "Argument = ";
+      message += server.arg("IchWillChip"); 
+      getChip();  
+    
+    } else if (server.arg("IchWillChip") == "error"){     //Parameter not found
+
+      message = "Argument = ";
+      message += server.arg("IchWillChip Error"); 
+      failBlink();  
+    
+    }
+    else {     //Parameter found
+      message = "Argument not found";
+    }
+
+    server.send(200, "text/plain", message);          //Returns the HTTP response
+
 }
 
 void handleSubmit() {
 
-  String SERVOValue;
+  /*String SERVOValue;
   SERVOValue = server.arg("SERVO");
 
   String KARTEValue;
@@ -87,19 +141,15 @@ void handleSubmit() {
 
   if ( KARTEValue == "KarteDrauf" ) {
     setRedLightOff();
-    setGreenLightOn()
-   /* servoblau.write(0);
-    servorot.write(165);
-    server.send ( 200, "text/html", getPage() );*/
-    
+    setGreenLightOn();
   }
+  
   else if ( KARTEValue == "KarteWeg" ) {
     setGreenLightOff();
     setRedLightOn();
   } else {
     Serial.println("Error KARTE Value");
   }
-  
 
   if ( SERVOValue == "0" ) {
     servoblau.write(0);
@@ -120,24 +170,54 @@ void handleSubmit() {
   } else
   {
     Serial.println("Error Servo Value");
-  }
+  }*/
 }
 
 void buttonPressed() {
    if (checkKarte() == true) {
-     getChip();
+     setGreenLightOn();
+     delay(1000);
+     setGreenLightOff();
+     postButtonPressed();
    } else {
      Serial.println("Es wurde keine Karte aufgelegt oder anderer Fehler");
      setGreenLightOff();
      setRedLightOn();
+     delay(5000);
+     setRedLightOff();
    }
+}
+
+void postButtonPressed() {
+  if(WiFi.status()== WL_CONNECTED){   //Check WiFi connection status
+ 
+   HTTPClient http;    //Declare object of class HTTPClient
+ 
+   http.begin("http://192.168.19.100/index2.php");      //Specify request destination
+   http.addHeader("Content-Type", "application/x-www-form-urlencoded");  //Specify content-type header
+ 
+   int httpCode = http.POST("call_this5=IchWillChip");   //Send the request
+   String payload = http.getString();                  //Get the response payload
+ 
+   Serial.println(httpCode);   //Print HTTP return code
+   Serial.println(payload);    //Print request response payload
+ 
+   http.end();  //Close connection
+ 
+ }else{
+ 
+    Serial.println("Error in WiFi connection");   
+ 
+ }
+ 
+  delay(1000);  //Send a request every 1 seconds
+ 
 }
 
 void getChip() {
     servoblau.write(0);
     servorot.write(165);
-    //server.send ( 200, "text/html", getPage() );
-    delay(2000);
+    delay(1000);
     servoblau.write(165);
     servorot.write(0);
     server.send ( 200, "text/html", getPage() );
@@ -146,6 +226,8 @@ void getChip() {
 
 bool checkKarte() {
   // Raspbery Pi fragen ob Karte drauf liegt
+  //Update: Ist unnötig, da Pi das selbst macht
+  karteLiegtAuf = true;
   return true;
 } 
 
@@ -154,7 +236,7 @@ void setGreenLightOn() {
 }
 
 void setGreenLightOff() {
-   digitalWrite(led, LOW);
+   digitalWrite(ledG, LOW);
 }
 
 void setRedLightOn() {
@@ -163,6 +245,19 @@ void setRedLightOn() {
 
 void setRedLightOff() {
   digitalWrite(ledR, LOW);
+}
+
+void redGreenBlink() {
+   digitalWrite(ledG, LOW);
+   digitalWrite(ledR, LOW);
+   digitalWrite(ledG, HIGH);
+   digitalWrite(ledR, LOW);
+   delay(400);
+   digitalWrite(ledG, LOW);
+   digitalWrite(ledR, HIGH);
+   delay(400);
+   digitalWrite(ledG, LOW);
+   digitalWrite(ledR, LOW);
 }
 
 void errorBlink() {
@@ -177,14 +272,48 @@ void errorBlink() {
   }
 }
 
-void sendAck() {
+void failBlink() {
+  for(int i = 0; i<4; i++){
+     setRedLightOn();
+     delay(700);
+     setRedLightOff();
+     delay(700);
+  }
+}
+
+void successBlink() {
   for(int i = 0; i<3; i++){
      setGreenLightOn();
-     delay(800);
+     delay(400);
      setGreenLightOff();
-     delay(800);
+     delay(400);
   }
+}
+
+void sendAck() {
+  successBlink();
   //send Timestamp as acknoledgement or only send acknoledgement
+  //Noch nicht Implementiert, da bis jetzt nicht notwendig
+}
+
+void handleNotFound() {
+  // We construct a message to be returned to the client
+  String message = "File Not Found\n\n";
+  // which includes what URI was requested
+  message += "URI: ";
+  message += server.uri();
+  // what method was used
+  message += "\nMethod: ";
+  message += (server.method() == HTTP_GET) ? "GET" : "POST";
+  // and what parameters were passed
+  message += "\nArguments: ";
+  message += server.args();
+  message += "\n";
+  for (uint8_t i = 0; i < server.args(); i++) {
+    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+  }
+  // the response, as expected, is a "Not Found" (404) error
+  server.send(404, "text/plain", message);
 }
 
 String getPage() {
@@ -202,31 +331,15 @@ String getPage() {
       </head>\
    <body>\
       <h1>ChipAutomat Web Interface</h1>\
-      <h3>Servo Test</h3>\
-      <form action='/' method='POST'>\
+      <h2>Der ChipAutomat ist online</h2>\
+  </body>\
+  </html>";
+
+  /*  <form action='/' method='POST'>\
       <INPUT class='button' type='submit' name='SERVO' value='0'>\    
       <INPUT class='button' type='submit' name='SERVO' value='90'>\    
       <INPUT class='button' type='submit' name='SERVO' value='180'>\
       <INPUT class='button' type='submit' name='KARTE' value='KarteDrauf'>\
-      <INPUT class='button' type='submit' name='KARTE' value='KarteWeg'>\
-  </body>\
-  </html>";
-
-/*page = "<html>\
-  <head>\
-    <meta http-equiv='refresh' content='5'/>\
-    <title>ESP8266 Demo</title>\
-    <style>\
-      body { background-color: #cccccc; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; }\
-    </style>\
-  </head>\
-  <body>\
-    <h1>Hello from ESP8266!</h1>\
-    <p>Uptime: %02d:%02d:%02d</p>\
-    <img src=\"/test.svg\" />\
-  </body>\
-</html>";*/
-
-    
+      <INPUT class='button' type='submit' name='KARTE' value='KarteWeg'>\*/
   return page;
 }
